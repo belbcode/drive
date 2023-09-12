@@ -2,45 +2,46 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"my-go-project/filesystem"
+	"my-go-project/network"
 	"os"
+	"os/signal"
+	"os/user"
+	"path/filepath"
+	"syscall"
 )
 
+func TestDir() (string, func()) {
+	currentUser, err := user.Current()
+	if err != nil {
+		log.Fatal(err)
+	}
+	dirSource := filepath.Join(currentUser.HomeDir, "DriveApp")
+	err = os.Mkdir(dirSource, 0700)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return dirSource, func() {
+		os.RemoveAll(dirSource)
+	}
+}
+
 func main() {
-	var err error
-	var wd string
-	var dirTree filesystem.Tree
-	wd, err = os.UserHomeDir()
+	dirSource, cleanUp := TestDir()
+	signalChannel := make(chan os.Signal, 1)
+	signal.Notify(signalChannel, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-signalChannel
+		fmt.Println(sig)
+		cleanUp()
+		os.Exit(1)
 
-	if err != nil {
-		fmt.Println(err)
+	}()
+	options := filesystem.Options{
+		Perm: 0700,
 	}
-	rootNode, err := filesystem.RecursiveBuildFromRoot(wd)
-	if err != nil {
-		fmt.Println(err)
-	}
-	fmt.Println(rootNode)
-	dirTree = filesystem.Tree{Root: rootNode}
-	treejson := dirTree.ToJSON()
-
-	os.WriteFile("tree.json", treejson, 0700)
-
-	// results := dirTree.Search("hello")
-	// for _, node := range results {
-	// 	fmt.Println(node.Info.Name())
-	// }
-	// fmt.Println(*dirStruct.SubDirectories)
-
-	// // reader := dirStruct
-	// pointer := *dirStruct.SubDirectories
-
-	// for {
-	// 	fmt.Scanln()
-	// 	if !(len(pointer) > 0) {
-	// 		fmt.Println("End of dir")
-	// 		break
-	// 	}
-	// 	pointer = *pointer[0].SubDirectories
-	// 	fmt.Println(pointer)
-	// }
+	drive := filesystem.CreateDrive(dirSource, options)
+	filesystem.WriteConfig(drive, options.Perm)
+	network.Server(drive)
 }
